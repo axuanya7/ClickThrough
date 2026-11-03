@@ -17,9 +17,10 @@ ClickThrough 是一款 Windows 小工具：把任意窗口浮在游戏画面之�
 最新版本：
 
 - [GitHub Releases](https://github.com/axuanya7/ClickThrough/releases/latest)
-- [ClickThrough-Setup.exe](https://github.com/axuanya7/ClickThrough/releases/latest/download/ClickThrough-Setup.exe)
+- [ClickThrough-Setup.exe](https://github.com/axuanya7/ClickThrough/releases/latest/download/ClickThrough-Setup.exe)（安装版）
+- [ClickThrough.exe](https://github.com/axuanya7/ClickThrough/releases/latest/download/ClickThrough.exe)（便携版）
 
-推荐使用安装版，安装时可以选择安装位置，更新时可在软件内直接下载替换。装完在「设置 → 应用」里可以正常卸载。
+推荐使用安装版，安装时可以选择安装位置，更新时可在软件内直接下载替换。装完在「设置 → 应用」里可以正常卸载。便携版解压即用，配置写在 exe 同目录。
 
 程序用 AutoHotkey 编译，会注册全局热键、修改其他窗口的样式，Defender 和国产杀软大概率误报，属于这类工具的共性。SmartScreen 提示时点「更多信息」→「仍要运行」；文件被删就把它加进排除项。
 
