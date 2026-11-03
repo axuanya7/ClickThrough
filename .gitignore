@@ -8,6 +8,10 @@ overlay-heartbeat.txt
 overlay-log.txt
 unlock-log.txt
 
+# 构建脚本和图标生成器只在本地用，不进仓库
+/build.ps1
+/tools/
+
 # 杂项
 *.log
 __pycache__/

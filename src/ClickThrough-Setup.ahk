@@ -5,7 +5,7 @@
 ;  https://github.com/axuanya7/ClickThrough   ·   MIT License
 ;
 ;  单文件安装包：主程序和卸载器用 FileInstall 嵌在自己里面。
-;  装到 %LOCALAPPDATA%\Programs\ClickThrough，不需要管理员权限。
+;  默认装到 %LOCALAPPDATA%\Programs\ClickThrough，安装界面里可以改成别的目录，不需要管理员权限。
 ;
 ;  参数：
 ;    /S 或 /SILENT        静默安装，不显示界面
@@ -82,39 +82,82 @@ ShowGui() {
 
     g.SetFont("s10", "Microsoft YaHei UI")
     g.Add("Text", "x20 y88 w90", "安装位置：")
-    g.Add("Text", "x110 y88 w430 cGray", InstallDir)
+    edDir := g.Add("Edit", "x110 y86 w420", InstallDir)
+    btnBrowse := g.Add("Button", "x538 y85 w62", "浏览…")
 
-    cbDesk := g.Add("CheckBox", "x20 y122 w420 Checked", "创建桌面快捷方式")
-    cbAuto := g.Add("CheckBox", "x20 y148 w420", "开机自动启动")
-    cbRun  := g.Add("CheckBox", "x20 y174 w420 Checked", "安装完成后立即运行")
+    cbDesk := g.Add("CheckBox", "x20 y122 w460 Checked", "创建桌面快捷方式")
+    cbAuto := g.Add("CheckBox", "x20 y148 w460", "开机自动启动")
+    cbRun  := g.Add("CheckBox", "x20 y174 w460 Checked", "安装完成后立即运行")
 
     g.SetFont("s9", "Microsoft YaHei UI")
-    g.Add("Text", "x20 y208 w520 cGray", "不需要管理员权限。卸载走「设置 → 应用」里的 " APPNAME "，或安装目录里的 Uninstall.exe。")
+    g.Add("Text", "x20 y208 w580 cGray", "不需要管理员权限。卸载走「设置 → 应用」里的 " APPNAME "，或安装目录里的 Uninstall.exe。")
 
-    bOK     := g.Add("Button", "x300 y244 w110 Default", "安装")
-    bCancel := g.Add("Button", "x420 y244 w110", "取消")
+    bOK     := g.Add("Button", "x368 y244 w110 Default", "安装")
+    bCancel := g.Add("Button", "x488 y244 w110", "取消")
 
-    bOK.OnEvent("Click", (*) => InstallFromGui(cbDesk.Value, cbAuto.Value, cbRun.Value))
+    btnBrowse.OnEvent("Click", (*) => BrowseDir(edDir, g))
+    bOK.OnEvent("Click", (*) => InstallFromGui(cbDesk.Value, cbAuto.Value, cbRun.Value, edDir.Value))
     bCancel.OnEvent("Click", (*) => ExitApp())
     g.OnEvent("Close", (*) => ExitApp())
     g.OnEvent("Escape", (*) => ExitApp())
-    g.Show("w560 h290")
+    g.Show("w620 h290")
+}
+
+; 挑安装目录。选完只回填到输入框，真正生效是在点「安装」之后。
+BrowseDir(edCtrl, ownerGui) {
+    start := Trim(edCtrl.Value)
+    if !DirExist(start) {
+        SplitPath(start, , &parent)
+        start := (parent != "" && DirExist(parent)) ? parent : ""
+    }
+    ; 安装窗口是置顶的，不临时撤掉置顶，系统的文件夹选择器会被压在它后面
+    try ownerGui.Opt("-AlwaysOnTop")
+    picked := ""
+    try picked := DirSelect(start, 0, "选择安装位置")
+    catch as e
+        SetupLog("DirSelect 失败: " e.Message)
+    try ownerGui.Opt("+AlwaysOnTop")
+    if (picked != "")
+        edCtrl.Value := picked
 }
 
 installDone := false
 
-InstallFromGui(desk, auto, run) {
-    global makeDesk, makeAuto, runAfter, installDone, APPNAME, InstallDir
+InstallFromGui(desk, auto, run, dir) {
+    global makeDesk, makeAuto, runAfter, installDone, APPNAME, InstallDir, ExePath, UninstPath
+
     if installDone
         return
+
+    dir := Trim(dir)
+    if (dir = "") {
+        MsgBox("先填一个安装位置。", APPNAME " 安装程序", "Iconi T5")
+        return
+    }
+    if !RegExMatch(dir, "^(?:[A-Za-z]:[\\/]|\\\\)") {
+        MsgBox("安装位置要填完整路径，比如：`nC:\Tools\ClickThrough`n`n也可以点右边的「浏览…」直接选。", APPNAME " 安装程序", "Iconi T8")
+        return
+    }
+    dir := RTrim(dir, "\/")
+    if (dir = "") || (SubStr(dir, -1) = ":") {
+        MsgBox("不能直接装到盘符根目录，挑一个文件夹。", APPNAME " 安装程序", "Iconi T8")
+        return
+    }
+
     installDone := true
     makeDesk := desk
     makeAuto := auto
     runAfter := run
+    InstallDir := dir
+    ExePath := InstallDir "\" APPNAME ".exe"
+    UninstPath := InstallDir "\Uninstall.exe"
+    SetupLog("界面指定安装目录: " InstallDir)
+
     if DoInstall() {
         MsgBox(APPNAME " 已安装。`n`n安装位置：" InstallDir "`n`n用法：右键托盘图标 → 系统设置；或按 Ctrl+Alt+2 选要浮在上面的窗口，Ctrl+Alt+D 锁定。", "安装完成", "Iconi T15")
         ExitApp(0)
     }
+    installDone := false
 }
 
 ;==================================================================
