@@ -169,15 +169,16 @@ PickTop(*) {
 PickWindow(which, onPicked := 0) {
     label := (which = "top") ? "顶层窗口（浮在上面看，点不动）" : "底层窗口（游戏，点击落到它上面）"
 
-    g := Gui("+AlwaysOnTop +Resize", "选择窗口 —— " label)
+    g := Gui("+AlwaysOnTop +OwnDialogs +Resize", "选择窗口 —— " label)
     g.SetFont("s10", "Microsoft YaHei UI")
     g.MarginX := 10
     g.MarginY := 10
 
-    tip := (which = "top")
+    ; 注意：这个局部变量别叫 tip，会把全局的 Tip() 函数遮住
+    hint := (which = "top")
         ? "挑一个要浮在游戏上面的窗口（浏览器、播放器等）。锁定后它会置顶，但鼠标点击会穿透过去。"
         : "挑一个接收点击的窗口，一般是游戏本体窗口。锁定时会先激活它，保证穿透的点击落在它身上。"
-    g.Add("Text", "x10 y10 w780 cGray", tip)
+    g.Add("Text", "x10 y10 w780 cGray", hint)
 
     lv := g.Add("ListView", "x10 y38 w780 h400", ["HWND", "进程", "标题"])
     lv.ModifyCol(1, 110)
@@ -206,7 +207,9 @@ PickWindow(which, onPicked := 0) {
     doPick(*) {
         row := lv.GetNext()
         if !row {
+            try g.Opt("-AlwaysOnTop")          ; 否则提示框会被选择器自己压住
             MsgBox("先在列表里点一行。", "选择窗口", "Iconi T3")
+            try g.Opt("+AlwaysOnTop")
             return
         }
         e := entries[row]
@@ -259,7 +262,7 @@ OpenSettings(*) {
         }
     }
 
-    g := Gui("+AlwaysOnTop +Resize -MaximizeBox", APPNAME " 系统设置")
+    g := Gui("+AlwaysOnTop +OwnDialogs +Resize -MaximizeBox", APPNAME " 系统设置")
     SettingsGui := g
     g.SetFont("s10", "Microsoft YaHei UI")
     g.MarginX := 16
@@ -316,16 +319,25 @@ OpenSettings(*) {
     btnBottom.OnEvent("Click", (*) => PickWindow("bottom", Refresh))
     cbAutoStart.OnEvent("Click", (ctrl, *) => SetAutoStart(ctrl.Value))
     cbAutoLock.OnEvent("Click", (ctrl, *) => SetAutoLock(ctrl.Value))
-    bLock.OnEvent("Click", (*) => ToggleOverlay())
+    bLock.OnEvent("Click", (*) => RunNormalThenRestore(g, () => ToggleOverlay()))
     bLog.OnEvent("Click", (*) => OpenLog())
-    bUpd.OnEvent("Click", (*) => CheckUpdate(true))
-    bAbout.OnEvent("Click", (*) => About())
+    bUpd.OnEvent("Click", (*) => RunNormalThenRestore(g, () => CheckUpdate(true)))
+    bAbout.OnEvent("Click", (*) => RunNormalThenRestore(g, () => About()))
     bClose.OnEvent("Click", onClose)
     g.OnEvent("Close", onClose)
     g.OnEvent("Escape", onClose)
 
     Refresh()
     g.Show("w680 h350")
+}
+
+; 我们的窗口是置顶的，直接弹 MsgBox 会被压在下面（+OwnDialogs 只解决归属，不解决置顶带）。
+; 所以弹窗前先把自己降级成普通窗口，弹完再恢复。
+RunNormalThenRestore(gui, fn) {
+    try gui.Opt("-AlwaysOnTop")
+    try fn.Call()
+    try gui.Opt("+AlwaysOnTop")
+    try WinActivate(gui)
 }
 
 SetAutoStart(on) {
@@ -654,8 +666,14 @@ CheckUpdate(manual := true) {
         json := HttpGet("https://api.github.com/repos/" RepoSlug "/releases/latest")
     } catch as e {
         Log("检查更新失败: " e.Message)
-        if manual
-            MsgBox("检查更新失败：`n" e.Message "`n`n也可能是网络不通或 GitHub 被墙。", APPNAME, "Icon! T8")
+        if manual {
+            if InStr(e.Message, "HTTP 404")
+                MsgBox("GitHub 上目前还没有发布版本，暂无更新可查。", APPNAME, "Iconi T6")
+            else if InStr(e.Message, "HTTP 403")
+                MsgBox("查询太频繁，被 GitHub 限流了，过一会儿再试。", APPNAME, "Iconi T8")
+            else
+                MsgBox("检查更新失败：`n" e.Message "`n`n也可能是网络不通。", APPNAME, "Icon! T8")
+        }
         return
     }
 

@@ -20,3 +20,9 @@ __pycache__/
 
 # 仓库根目录的构建产物（正式产物在 dist\，已被忽略）
 /*.exe
+
+# 本机测试用的开发版
+/dev/
+
+# 本机工具链（AutoHotkey + Ahk2Exe）
+/_toolchain/

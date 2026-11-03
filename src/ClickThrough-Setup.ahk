@@ -45,7 +45,7 @@ for a in A_Args {
 customDir := Trim(customDir, '"')
 
 LocalAppData := EnvGet("LOCALAPPDATA")
-InstallDir  := (customDir != "") ? customDir : LocalAppData "\Programs\" APPNAME
+InstallDir  := (customDir != "") ? ResolveInstallDir(customDir) : LocalAppData "\Programs\" APPNAME
 ExePath     := InstallDir "\" APPNAME ".exe"
 UninstPath  := InstallDir "\Uninstall.exe"
 UninstKey   := "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\" APPNAME
@@ -67,11 +67,41 @@ if (silent || updateMode) {
 
 ShowGui()
 
+; AHK 自带的 MsgBox 没法自己置顶，别的置顶窗口（全屏游戏、覆盖层）会把它压住。
+; 弹之前挂个定时器，框一出来就顶到最前。
+MsgTop(text, title, opts := "") {
+    SetTimer(PinDialog, 60)
+    r := MsgBox(text, title, opts)
+    SetTimer(PinDialog, 0)
+    return r
+}
+
+PinDialog(*) {
+    h := WinExist("ahk_class #32770 ahk_pid " ProcessExist())
+    if h
+        try WinSetAlwaysOnTop(true, h)
+}
+
+; 用户选的只是"装到哪"，真正的安装目录是那个位置下面的 ClickThrough 子文件夹。
+; 例：选 D:\工具 → 装进 D:\工具\ClickThrough。
+; 如果用户自己已经指到了 ...\ClickThrough，就不重复套一层。
+ResolveInstallDir(dir) {
+    global APPNAME
+    dir := RTrim(Trim(dir), "\/")
+    if (dir = "")
+        return dir
+    SplitPath(dir, , , , &nameOnly)
+    if (StrLower(nameOnly) = StrLower(APPNAME))
+        return dir
+    return dir "\" APPNAME
+}
+
 ;==================================================================
 ShowGui() {
     global APPNAME, AppVer, InstallDir
 
-    g := Gui("+AlwaysOnTop -MaximizeBox", APPNAME " 安装程序")
+    ; 不要加 +AlwaysOnTop：会把自己的 MsgBox 和文件夹选择器压在下面
+    g := Gui("+OwnDialogs -MaximizeBox", APPNAME " 安装程序")
     g.SetFont("s12 Bold", "Microsoft YaHei UI")
     g.MarginX := 20
     g.MarginY := 16
@@ -85,22 +115,33 @@ ShowGui() {
     edDir := g.Add("Edit", "x110 y86 w420", InstallDir)
     btnBrowse := g.Add("Button", "x538 y85 w62", "浏览…")
 
-    cbDesk := g.Add("CheckBox", "x20 y122 w460 Checked", "创建桌面快捷方式")
-    cbAuto := g.Add("CheckBox", "x20 y148 w460", "开机自动启动")
-    cbRun  := g.Add("CheckBox", "x20 y174 w460 Checked", "安装完成后立即运行")
+    g.SetFont("s9", "Microsoft YaHei UI")
+    prevText := g.Add("Text", "x110 y112 w500 cGray", "")
+
+    g.SetFont("s10", "Microsoft YaHei UI")
+    cbDesk := g.Add("CheckBox", "x20 y144 w460 Checked", "创建桌面快捷方式")
+    cbAuto := g.Add("CheckBox", "x20 y170 w460", "开机自动启动")
+    cbRun  := g.Add("CheckBox", "x20 y196 w460 Checked", "安装完成后立即运行")
 
     g.SetFont("s9", "Microsoft YaHei UI")
-    g.Add("Text", "x20 y208 w580 cGray", "不需要管理员权限。卸载走「设置 → 应用」里的 " APPNAME "，或安装目录里的 Uninstall.exe。")
+    g.Add("Text", "x20 y228 w580 cGray", "不需要管理员权限。卸载走「设置 → 应用」里的 " APPNAME "，或安装目录里的 Uninstall.exe。")
 
-    bOK     := g.Add("Button", "x368 y244 w110 Default", "安装")
-    bCancel := g.Add("Button", "x488 y244 w110", "取消")
+    bOK     := g.Add("Button", "x368 y262 w110 Default", "安装")
+    bCancel := g.Add("Button", "x488 y262 w110", "取消")
 
-    btnBrowse.OnEvent("Click", (*) => BrowseDir(edDir, g))
-    bOK.OnEvent("Click", (*) => InstallFromGui(cbDesk.Value, cbAuto.Value, cbRun.Value, edDir.Value))
+    ShowResolved(*) {
+        resolved := ResolveInstallDir(edDir.Value)
+        prevText.Value := (resolved = "") ? "" : "实际安装到：" resolved
+    }
+
+    btnBrowse.OnEvent("Click", (*) => (BrowseDir(edDir, g), ShowResolved()))
+    edDir.OnEvent("Change", ShowResolved)
+    bOK.OnEvent("Click", (*) => InstallFromGui(cbDesk.Value, cbAuto.Value, cbRun.Value, edDir, ShowResolved))
     bCancel.OnEvent("Click", (*) => ExitApp())
     g.OnEvent("Close", (*) => ExitApp())
     g.OnEvent("Escape", (*) => ExitApp())
-    g.Show("w620 h290")
+    ShowResolved()
+    g.Show("w620 h310")
 }
 
 ; 挑安装目录。选完只回填到输入框，真正生效是在点「安装」之后。
@@ -110,32 +151,32 @@ BrowseDir(edCtrl, ownerGui) {
         SplitPath(start, , &parent)
         start := (parent != "" && DirExist(parent)) ? parent : ""
     }
-    ; 安装窗口是置顶的，不临时撤掉置顶，系统的文件夹选择器会被压在它后面
-    try ownerGui.Opt("-AlwaysOnTop")
+    ; 起点前面必须带 *，否则 DirSelect 会禁止向上导航，用户只能困在当前目录里
+    ; 选不到别的盘；3 = 带「新建文件夹」按钮 + 可编辑框
+    startArg := (start = "") ? "" : "*" start
     picked := ""
-    try picked := DirSelect(start, 0, "选择安装位置")
+    try picked := DirSelect(startArg, 3, "选择安装位置")
     catch as e
         SetupLog("DirSelect 失败: " e.Message)
-    try ownerGui.Opt("+AlwaysOnTop")
     if (picked != "")
-        edCtrl.Value := picked
+        edCtrl.Value := RegExReplace(picked, "\\$")
 }
 
 installDone := false
 
-InstallFromGui(desk, auto, run, dir) {
+InstallFromGui(desk, auto, run, edCtrl, refresh) {
     global makeDesk, makeAuto, runAfter, installDone, APPNAME, InstallDir, ExePath, UninstPath
 
     if installDone
         return
 
-    dir := Trim(dir)
+    dir := Trim(edCtrl.Value)
     if (dir = "") {
         MsgBox("先填一个安装位置。", APPNAME " 安装程序", "Iconi T5")
         return
     }
     if !RegExMatch(dir, "^(?:[A-Za-z]:[\\/]|\\\\)") {
-        MsgBox("安装位置要填完整路径，比如：`nC:\Tools\ClickThrough`n`n也可以点右边的「浏览…」直接选。", APPNAME " 安装程序", "Iconi T8")
+        MsgBox("安装位置要填完整路径，比如：`nC:\Tools`n`n也可以点右边的「浏览…」直接选。", APPNAME " 安装程序", "Iconi T8")
         return
     }
     dir := RTrim(dir, "\/")
@@ -144,17 +185,22 @@ InstallFromGui(desk, auto, run, dir) {
         return
     }
 
+    ; 选的是"装到哪"，真正装进它下面的 ClickThrough 子文件夹
+    InstallDir := ResolveInstallDir(dir)
+    edCtrl.Value := InstallDir
+    if IsObject(refresh)
+        refresh.Call()
+
     installDone := true
     makeDesk := desk
     makeAuto := auto
     runAfter := run
-    InstallDir := dir
     ExePath := InstallDir "\" APPNAME ".exe"
     UninstPath := InstallDir "\Uninstall.exe"
-    SetupLog("界面指定安装目录: " InstallDir)
+    SetupLog("界面指定安装位置: " dir " → 安装目录: " InstallDir)
 
     if DoInstall() {
-        MsgBox(APPNAME " 已安装。`n`n安装位置：" InstallDir "`n`n用法：右键托盘图标 → 系统设置；或按 Ctrl+Alt+2 选要浮在上面的窗口，Ctrl+Alt+D 锁定。", "安装完成", "Iconi T15")
+        MsgTop(APPNAME " 已安装。`n`n安装目录：" InstallDir "`n`n用法：右键托盘图标 → 系统设置；或按 Ctrl+Alt+2 选要浮在上面的窗口，Ctrl+Alt+D 锁定。", "安装完成", "Iconi T15")
         ExitApp(0)
     }
     installDone := false
@@ -169,7 +215,7 @@ DoInstall() {
     if ProcessExist(APPNAME ".exe") {
         SetupLog("检测到正在运行的实例")
         if !updateMode {
-            r := MsgBox(APPNAME " 正在运行，安装程序需要先关掉它。`n`n继续安装？", APPNAME " 安装程序", "Icon? YesNo Default2 T30")
+            r := MsgTop(APPNAME " 正在运行，安装程序需要先关掉它。`n`n继续安装？", APPNAME " 安装程序", "Icon? YesNo Default2 T30")
             if (r != "Yes") {
                 SetupLog("用户取消（程序在运行）")
                 return false
@@ -194,7 +240,10 @@ DoInstall() {
         SetupLog("旧进程已退出，用时 " waited "ms")
     }
 
-    ;--- 2. 建目录 ---
+    ;--- 2. 安全检查 + 建目录 ---
+    if !CheckTargetDir()
+        return false
+
     if !DirExist(InstallDir) {
         try DirCreate(InstallDir)
         catch as e {
@@ -285,6 +334,62 @@ WritePayload(kind, dest, tries := 30) {
     return false
 }
 
+; 安装目录安全检查：
+;   1. 不往系统目录、用户主目录、桌面、我的文档里装
+;   2. 目标目录非空、且看起来不是旧的 ClickThrough 安装目录时，先问一句
+; 这条是血的教训：装到别人的工具目录里，卸载时按目录清空会连累一片无关文件。
+CheckTargetDir() {
+    global InstallDir, APPNAME, silent, updateMode
+
+    lowered := StrLower(RTrim(InstallDir, "\"))
+    protected := [
+        A_WinDir,
+        EnvGet("ProgramFiles"),
+        EnvGet("ProgramFiles(x86)"),
+        EnvGet("ProgramData"),
+        EnvGet("USERPROFILE"),
+        A_Desktop,
+        A_MyDocuments
+    ]
+    for p in protected {
+        if (p = "" || p = "0")
+            continue
+        if (lowered = StrLower(RTrim(p, "\"))) {
+            SetupLog("拒绝安装到受保护目录: " InstallDir)
+            if !(silent || updateMode)
+                MsgBox("不能装到这个地方：`n" InstallDir "`n`n换个文件夹，比如 D:\Tools\ClickThrough。", APPNAME " 安装程序", "Icon! T15")
+            return false
+        }
+    }
+
+    if DirExist(InstallDir) {
+        n := 0
+        hasOurs := false
+        loop files, InstallDir "\*", "FD" {
+            n++
+            if (StrLower(A_LoopFileName) = StrLower(APPNAME ".exe"))
+                hasOurs := true
+        }
+        if (n > 0 && !hasOurs) {
+            SetupLog("目标目录非空且不是旧安装目录: " InstallDir " 条目数=" n)
+            if (silent || updateMode) {
+                SetupLog("静默模式拒绝往非空目录里装")
+                return false
+            }
+            r := MsgTop("这个文件夹里已经有 " n " 个别的文件或文件夹：`n" InstallDir
+                . "`n`n" APPNAME " 只往里面放自己的文件，卸载时也只删自己的，不会动其它东西。"
+                . "`n`n但更推荐单独建一个文件夹，比如 D:\Tools\ClickThrough。`n`n继续装到这里吗？",
+                APPNAME " 安装程序", "Icon? YesNo Default2 T30")
+            if (r != "Yes") {
+                SetupLog("用户选择换个目录")
+                return false
+            }
+            SetupLog("用户确认装进非空目录")
+        }
+    }
+    return true
+}
+
 MakeShortcut(lnkPath, target, workDir) {
     SplitPath(lnkPath, , &dir)
     if !DirExist(dir)
@@ -294,7 +399,7 @@ MakeShortcut(lnkPath, target, workDir) {
         sc.TargetPath := target
         sc.WorkingDirectory := workDir
         sc.IconLocation := target ",0"
-        sc.Description := "ClickThrough —— 窗口穿透浮层"
+        sc.Description := "窗口穿透浮层"     ; 别再重复程序名，否则提示框里像两个名字
         sc.Save()
     } catch as e {
         SetupLog("建快捷方式失败: " lnkPath " · " e.Message)
