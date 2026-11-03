@@ -676,8 +676,12 @@ CheckUpdate(manual := true) {
     }
 
     msg := "发现新版本 " latest "（当前 " AppVer "）"
-    if (rel.body != "")
-        msg .= "`n`n" SubStr(rel.body, 1, 700)
+    note := StripMarkdown(rel.body)
+    if (note != "") {
+        if (StrLen(note) > 400)
+            note := SubStr(note, 1, 400) "…`n（完整说明见 release 页）"
+        msg .= "`n`n" note
+    }
     msg .= "`n`n现在下载并安装？程序会自动退出，装完再自己启动。"
 
     r := MsgBox(msg, "检查更新", "Iconi YesNo Default1 T60")
@@ -721,6 +725,18 @@ ParseRelease(json) {
     if RegExMatch(json, '"body"\s*:\s*"((?:[^"\\]|\\.)*)"', &b)
         body := JsonUnescape(b[1])
     return { tag: t[1], url: url, body: body }
+}
+
+; 把 release 说明里的 markdown 标记去掉，弹窗里别满屏 ** 和 ##
+StripMarkdown(s) {
+    s := RegExReplace(s, "(?m)^[ \t]{0,3}#{1,6}[ \t]*", "")
+    s := StrReplace(s, "``", "")
+    s := StrReplace(s, "**", "")
+    s := StrReplace(s, "__", "")
+    s := RegExReplace(s, "(?m)^[ \t]*[-*][ \t]+", "· ")
+    s := RegExReplace(s, "\[([^\]]+)\]\([^)]*\)", "$1")
+    s := RegExReplace(s, "`n{3,}", "`n`n")
+    return Trim(s)
 }
 
 JsonUnescape(s) {
